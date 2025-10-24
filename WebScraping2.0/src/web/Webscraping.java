@@ -16,6 +16,7 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 
 import org.openqa.selenium.By;
+import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
@@ -441,20 +442,13 @@ public class Webscraping {
 	    System.out.println("📂 Existing data: " + papers.size() + " papers and "
 	            + paperInstructorPairs.size() + " paper–instructor pairs.");
 	    System.out.println("✅ Skipping " + completedInstructorIds.size() + " instructors already scraped.");
-	    int flag = 0;
+
 	    for (Instructor inst : instructors) {
 	        if (completedInstructorIds.contains(inst.getId())) {
 	            System.out.println("⏭️ Skipping " + inst.getName() + " (already scraped).");
 	            continue;
 	        }
 	        
-	        if (flag == 0) {
-	        	if (inst.getName().equals("Jack Davidson")) {
-	        		flag = 1;
-	        	}
-	        	continue;
-	        }
-
 	        String name = inst.getName();
 	        System.out.println("\n🔍 Scraping instructor: " + name);
 
@@ -600,63 +594,78 @@ public class Webscraping {
 	    String[] queries = {name, name + " uva"};
 
 	    for (String query : queries) {
-	        // Wait before each search query
 	        safeSleepWithRandom(2000, 10000);
 
 	        driver.get("https://scholar.google.com/");
 	        wait.until(ExpectedConditions.presenceOfElementLocated(By.name("q")));
 
-	        // Simulate a more human typing pattern
-	        safeSleepWithRandom(500, 1000);
+	        // Type like a human
 	        WebElement searchBox = driver.findElement(By.name("q"));
 	        searchBox.clear();
 	        safeSleepWithRandom(300, 600);
 
-	        // Type query character by character
 	        for (char c : query.toCharArray()) {
 	            searchBox.sendKeys(String.valueOf(c));
-	            safeSleepWithRandom(100, 200); // small pause between keystrokes
+	            safeSleepWithRandom(100, 200);
 	        }
 
 	        safeSleepWithRandom(400, 800);
 	        searchBox.sendKeys(Keys.ENTER);
 
 	        wait.until(ExpectedConditions.presenceOfAllElementsLocatedBy(By.cssSelector("div.gs_r")));
-	        safeSleepWithRandom(2000, 1500); // let page fully load before clicking
+	        safeSleepWithRandom(2000, 3000); // wait for all results to load
 
 	        try {
-	            WebElement profileLink = driver.findElement(By.cssSelector("h4.gs_rt2 a"));
-	            String url = profileLink.getAttribute("href");
+	            // Get ALL visible profile links
+	            List<WebElement> profileLinks = driver.findElements(By.cssSelector("h4.gs_rt2 a"));
 
-	            safeSleepWithRandom(500, 1500);
-	            profileLink.click();
+	            for (WebElement profileLink : profileLinks) {
+	                String url = profileLink.getAttribute("href");
+	                if (url == null || !url.contains("scholar.google.com/citations?")) continue;
 
-	            wait.until(ExpectedConditions.presenceOfElementLocated(By.id("gsc_prf_in")));
-	            safeSleepWithRandom(1000, 2000);
+	                // Open in new tab to avoid losing search page
+	                ((JavascriptExecutor) driver).executeScript("window.open(arguments[0], '_blank');", url);
+	                ArrayList<String> tabs = new ArrayList<>(driver.getWindowHandles());
+	                driver.switchTo().window(tabs.get(tabs.size() - 1));
 
-	            // Check affiliation lines
-	            List<WebElement> lines = driver.findElements(By.cssSelector("#gsc_prf_i .gsc_prf_il"));
-	            for (WebElement line : lines) {
-	                String text = line.getText().toLowerCase();
-	                if (text.contains("university of virginia") || text.contains("virginia.edu")) {
-	                    return url;
+	                wait.until(ExpectedConditions.presenceOfElementLocated(By.id("gsc_prf_in")));
+	                safeSleepWithRandom(1000, 2000);
+
+	                // Check affiliations
+	                List<WebElement> lines = driver.findElements(By.cssSelector("#gsc_prf_i .gsc_prf_il"));
+	                for (WebElement line : lines) {
+	                    String text = line.getText().toLowerCase();
+	                    if (text.contains("university of virginia") || text.contains("virginia.edu")) {
+	                        // Close the tab and return
+	                        driver.close();
+	                        driver.switchTo().window(tabs.get(0));
+	                        return url;
+	                    }
 	                }
-	            }
 
-	            // Check verified email
-	            safeSleepWithRandom(500, 1000);
-	            List<WebElement> emails = driver.findElements(By.cssSelector("#gsc_prf_ivh"));
-	            for (WebElement e : emails) {
-	                String t = e.getText().toLowerCase();
-	                if (t.contains("verified email") && t.contains("virginia.edu")) {
-	                    return url;
+	                // Check verified email
+	                List<WebElement> emails = driver.findElements(By.cssSelector("#gsc_prf_ivh"));
+	                for (WebElement e : emails) {
+	                    String t = e.getText().toLowerCase();
+	                    if (t.contains("verified email") && t.contains("virginia.edu")) {
+	                        driver.close();
+	                        driver.switchTo().window(tabs.get(0));
+	                        return url;
+	                    }
 	                }
+
+	                // Close tab and go back to search results
+	                driver.close();
+	                driver.switchTo().window(tabs.get(0));
+
+	                safeSleepWithRandom(800, 1800);
 	            }
 
 	        } catch (Exception ignored) {
 	            safeSleepWithRandom(1000, 2000);
 	        }
 	    }
+
 	    return null;
 	}
 
