@@ -26,6 +26,8 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Webscraping {
 
@@ -77,16 +79,16 @@ public class Webscraping {
 	    
 	    // Scrape Google Scholar papers and topics
 	    
-	    HashSet<Instructor> instructors = loadInstructorsFromCSV("InstructorCatalog.csv");
-	    HashSet<Topic> topics = loadTopicsFromCSV("TopicCatalog.csv");
-	    HashSet<TopicInstructorPair> topicInstructorPairs = loadTopicInstructorPairsFromCSV("TopicInstructorPairs.csv");
-	    HashSet<PaperInstructorPair> paperInstructorPairs = loadPaperInstructorPairsFromCSV("PaperInstructorPairs.csv");
-	    HashSet<Paper> papers = loadPapersFromCSV("PaperCatalog.csv");
+	    //HashSet<Instructor> instructors = loadInstructorsFromCSV("InstructorCatalog.csv");
+	    //HashSet<Topic> topics = loadTopicsFromCSV("TopicCatalog.csv");
+	    //HashSet<TopicInstructorPair> topicInstructorPairs = loadTopicInstructorPairsFromCSV("TopicInstructorPairs.csv");
+	    //HashSet<PaperInstructorPair> paperInstructorPairs = loadPaperInstructorPairsFromCSV("PaperInstructorPairs.csv");
+	    //HashSet<Paper> papers = loadPapersFromCSV("PaperCatalog.csv");
 	    /*
 	    HashSet<PaperInstructorPair> paperInstructorPairs = new HashSet<PaperInstructorPair>();
 	    HashSet<Paper> papers = new HashSet<Paper>();
 	    */
-	    
+	    /*
 	    List<HashSet<?>> scholarData = scrapeScholarPapersAndTopics(driver, wait, instructors, topics, topicInstructorPairs, papers, paperInstructorPairs);
 	    @SuppressWarnings("unchecked")
 	    HashSet<Paper> tempPapers = (HashSet<Paper>) scholarData.get(0);
@@ -101,17 +103,25 @@ public class Webscraping {
 	    @SuppressWarnings("unchecked")
 	    HashSet<TopicInstructorPair> tempPairs = (HashSet<TopicInstructorPair>) scholarData.get(3);
 	    topicInstructorPairs = tempPairs;
-
+	    */
 	    // Save papers and paper-instructor pairs
-	    savePapersToCSV(papers, "PaperCatalog.csv");
-	    savePaperInstructorPairsToCSV(paperInstructorPairs, "PaperInstructorPairs.csv");
+	    //savePapersToCSV(papers, "PaperCatalog.csv");
+	    //savePaperInstructorPairsToCSV(paperInstructorPairs, "PaperInstructorPairs.csv");
 
 	    // Save updated topics
-	    saveTopicsToCSV(topics, "TopicCatalog.csv");
-	    saveTopicInstructorPairsToCSV(topicInstructorPairs, "TopicInstructorPairs.csv");
+	    //saveTopicsToCSV(topics, "TopicCatalog.csv");
+	    //saveTopicInstructorPairsToCSV(topicInstructorPairs, "TopicInstructorPairs.csv");
+	    //HashSet<Paper> papers = loadPapersFromCSV("PaperCatalog.csv");
+	    //cleanPaperYears(papers);
+	    //savePapersToCSV(papers, "PaperCatalog.csv");
 	    
+	    //get course requirments
+	    HashSet<Department> departments = loadDepartments();
+	    HashSet<CourseDepartmentPair> courseDepartmentPairs = loadCourseDepartmentPairsFromCSV("CourseDepartmentPairs.csv");
+	    HashSet<Course> courses = loadCoursesFromCSV("CourseCatalog.csv", courseDepartmentPairs, departments);
+	    HashSet<CourseRequirementPair> courseRequirementPairs = extractCourseRequirements(driver, wait, departments, courses);
+	    saveCourseRequirementPairsToCSV(courseRequirementPairs, "CourseRequirementPairs.csv");
 	    
-
 	    driver.quit();
 	}
 
@@ -764,7 +774,149 @@ public class Webscraping {
 	        Thread.sleep(ms);
 	    } catch (InterruptedException ignored) {}
 	}
+	
+	public static HashSet<CourseRequirementPair> extractCourseRequirements(
+	        WebDriver driver,
+	        WebDriverWait wait,
+	        HashSet<Department> departmentsSet,
+	        HashSet<Course> courses) {
 
+	    HashSet<CourseRequirementPair> courseRequirementPairs = new HashSet<>();
+
+	    int[] semesterIds = {8, 6, 2, 1};
+	    String[] departments = {"APMA", "BME", "CHE", "CEE", "CompSci", "ECE", "ENGR", "MAE", "MSE", "STS", "SYS"};
+	    String baseUrl = "https://louslist.org/page.php?Semester=1";
+	    String extraUrl = "&Type=Group&Group=";
+
+	    // --- Build course lookup map ---
+	    Map<String, Integer> courseLookup = new HashMap<>();
+	    for (Course c : courses) {
+	        String deptCode = c.getDepartment().toUpperCase().trim();
+	        if (deptCode.isEmpty()) {
+	            System.out.println("⚠️ Skipping course " + c.getId() + " (missing department)");
+	            continue;
+	        }
+	        String key = (deptCode + " " + c.getNumber()).toUpperCase().trim();
+	        courseLookup.put(key, c.getId());
+	        System.out.println("DEBUG: Adding course key='" + key + "' -> ID=" + c.getId());
+	    }
+
+	    // --- Crawl through departments and semesters ---
+	    for (String deptCode : departments) {
+	        for (int year = 25; year >= 12; year--) {
+	            for (int semesterId : semesterIds) {
+	                String url = baseUrl + year + semesterId + extraUrl + deptCode;
+	                System.out.println("DEBUG: Visiting URL: " + url);
+
+	                driver.get(url);
+	                safeSleepWithRandom(800, 1500);
+
+	                List<WebElement> rows = driver.findElements(By.xpath("//tr"));
+	                System.out.println("DEBUG: Found " + rows.size() + " <tr> rows for deptCode=" + deptCode + " year=" + year + " sem=" + semesterId);
+
+	                String currentCourseKey = null;
+	                Integer currentCourseId = null;
+	                Map<Integer, Set<Integer>> prereqIdsMap = new HashMap<>();
+	                Map<Integer, Set<String>> prereqTextMap = new HashMap<>();
+
+	                for (WebElement row : rows) {
+	                    try {
+	                        // Detect a new course header row
+	                        List<WebElement> courseNumSpans = row.findElements(By.xpath(".//td[@class='CourseNum']/span"));
+	                        if (!courseNumSpans.isEmpty()) {
+	                            String catalogNumber = courseNumSpans.get(0).getText().trim();
+	                            String[] parts = catalogNumber.split("\\s+");
+	                            if (parts.length >= 2) {
+	                                currentCourseKey = (parts[0] + " " + parts[1]).toUpperCase();
+	                                currentCourseId = courseLookup.get(currentCourseKey);
+	                                System.out.println("DEBUG: catalogNumber='" + catalogNumber + "' -> key='" + currentCourseKey + "' -> ID=" + currentCourseId);
+
+	                                if (currentCourseId == null) {
+	                                    System.out.println("⚠️ Key not found in courseLookup: '" + currentCourseKey + "'");
+	                                }
+	                            }
+	                        }
+
+	                        if (currentCourseId != null) {
+	                            // Look for spans with hover prereq text
+	                            List<WebElement> prereqElems = row.findElements(
+	                                    By.xpath(".//span[contains(@onmouseover,'Enrollment Requirements:')]")
+	                            );
+
+	                            for (WebElement elem : prereqElems) {
+	                                String hoverText = elem.getAttribute("onmouseover");
+	                                if (hoverText == null) continue;
+
+	                                System.out.println("DEBUG: Raw hoverText: " + hoverText);
+
+	                                // Updated regex: support "return overlib('...text...',AUTOSTATUS,WRAP)"
+	                                Matcher matcher = Pattern.compile(
+	                                        "overlib\\s*\\(\\s*'([^']+)'\\s*,",
+	                                        Pattern.CASE_INSENSITIVE
+	                                ).matcher(hoverText);
+
+	                                if (!matcher.find()) {
+	                                    System.out.println("⚠️ Could not parse overlib text for: " + hoverText);
+	                                    continue;
+	                                }
+
+	                                // Clean up and normalize the text
+	                                String reqText = matcher.group(1)
+	                                        .replace("Enrollment Requirements:", "")
+	                                        .replace("&nbsp;", " ")
+	                                        .replace("&amp;", "&")
+	                                        .trim();
+
+	                                reqText = reqText.replaceAll("\\s+", " ");
+	                                System.out.println("✅ Parsed prereqText for " + currentCourseKey + ": " + reqText);
+
+	                                // Preserve AND/OR structure explicitly
+	                                String parsedReqText = reqText
+	                                        .replaceAll("(?i)\\band\\b", " and ")
+	                                        .replaceAll("(?i)\\bor\\b", " or ")
+	                                        .replaceAll("\\s+", " ");
+
+	                                prereqTextMap.computeIfAbsent(currentCourseId, k -> new HashSet<>()).add(parsedReqText);
+
+	                                // Extract possible course codes from text
+	                                Matcher courseMatcher = Pattern.compile("([A-Za-z]{2,4}\\s?\\d{4})").matcher(reqText);
+	                                while (courseMatcher.find()) {
+	                                    String prereqCode = courseMatcher.group(1).replaceAll("\\s+", " ").toUpperCase();
+	                                    Integer prereqId = courseLookup.get(prereqCode);
+	                                    System.out.println("DEBUG: Found prereq course code '" + prereqCode + "' -> ID=" + prereqId);
+
+	                                    if (prereqId != null) {
+	                                        prereqIdsMap.computeIfAbsent(currentCourseId, k -> new HashSet<>()).add(prereqId);
+	                                    }
+	                                }
+	                            }
+	                        }
+
+	                    } catch (Exception e) {
+	                        System.out.println("⚠️ Error processing row: " + e.getMessage());
+	                    }
+	                }
+
+	                // After finishing the rows, create pairs
+	                for (Map.Entry<Integer, Set<Integer>> entry : prereqIdsMap.entrySet()) {
+	                    Integer courseId = entry.getKey();
+	                    Set<String> prereqTexts = prereqTextMap.getOrDefault(courseId, new HashSet<>());
+	                    String alternatives = String.join(" and ", prereqTexts);
+
+	                    for (Integer prereqId : entry.getValue()) {
+	                        CourseRequirementPair pair = new CourseRequirementPair(prereqId, courseId, alternatives);
+	                        courseRequirementPairs.add(pair);
+	                        System.out.println("✅ Added pair: courseId=" + courseId + " <- prereqId=" + prereqId + " | text=" + alternatives);
+	                    }
+	                }
+	            }
+	        }
+	    }
+
+	    System.out.println("✅ Extracted " + courseRequirementPairs.size() + " course–requirement pairs.");
+	    return courseRequirementPairs;
+	}
+	
 	/**
 	 * Save instructors to CSV.
 	 */
@@ -991,6 +1143,68 @@ public class Webscraping {
 	    }
 	}
 	
+	private static HashSet<Course> loadCoursesFromCSV(
+	        String filename, 
+	        HashSet<CourseDepartmentPair> courseDeptPairs, 
+	        HashSet<Department> departments) {
+
+	    HashSet<Course> courses = new HashSet<>();
+
+	    // Build a map from department ID to department name for fast lookup
+	    HashMap<Integer, String> deptIdToName = new HashMap<>();
+	    for (Department dept : departments) {
+	        deptIdToName.put(dept.getId(), dept.getName());
+	    }
+
+	    try (BufferedReader reader = new BufferedReader(new FileReader(SAVE_PATH + filename))) {
+	        String line;
+	        boolean isHeader = true;
+
+	        while ((line = reader.readLine()) != null) {
+	            // Skip header
+	            if (isHeader) {
+	                isHeader = false;
+	                continue;
+	            }
+
+	            List<String> fields = parseCsvLine(line);
+	            if (fields.size() < 4) continue;
+
+	            int id = 0;
+	            try {
+	                id = Integer.parseInt(fields.get(0).trim());
+	            } catch (NumberFormatException e) {
+	                id = courses.size() + 1;
+	            }
+
+	            String number = fields.get(1).trim();
+	            String name = fields.get(2).trim();
+	            String description = fields.get(3).trim();
+
+	            // Find department name for this course
+	            String departmentName = "";
+	            for (CourseDepartmentPair pair : courseDeptPairs) {
+	                if (pair.getCourseId() == id) {
+	                    departmentName = deptIdToName.getOrDefault(pair.getDepartmentId(), "");
+	                    break; // assume one department per course
+	                }
+	            }
+
+	            Course course = new Course(departmentName, number, name, description);
+	            course.setId(id);
+	            courses.add(course);
+	        }
+
+	        System.out.println("✅ Loaded " + courses.size() + " courses from " + filename);
+
+	    } catch (IOException e) {
+	        System.out.println("❌ Error loading courses from CSV: " + e.getMessage());
+	        e.printStackTrace();
+	    }
+
+	    return courses;
+	}
+	
 	// Save Courses to CSV
 	public static void saveCoursesToCSV(HashSet<Course> courses, String filePath) {
 	    try (PrintWriter writer = new PrintWriter(new FileWriter(SAVE_PATH + filePath))) {
@@ -1010,6 +1224,8 @@ public class Webscraping {
 	        System.out.println("❌ Error writing courses to CSV: " + e.getMessage());
 	    }
 	}
+	
+	
 
 	/**
 	 * Escapes a field for CSV (comma-delimited).
@@ -1036,6 +1252,31 @@ public class Webscraping {
 	    } catch (IOException e) {
 	        e.printStackTrace();
 	    }
+	}
+	
+	private static HashSet<CourseDepartmentPair> loadCourseDepartmentPairsFromCSV(String fileName) {
+	    HashSet<CourseDepartmentPair> pairs = new HashSet<>();
+	    String inputFile = SAVE_PATH + fileName;
+
+	    try (BufferedReader br = new BufferedReader(new FileReader(inputFile))) {
+	        String line = br.readLine(); // skip header
+	        while ((line = br.readLine()) != null) {
+	            String[] parts = line.split(",", -1);
+	            if (parts.length < 2) continue;
+
+	            int courseId = Integer.parseInt(parts[0].trim());
+	            int departmentId = Integer.parseInt(parts[1].trim());
+
+	            CourseDepartmentPair pair = new CourseDepartmentPair(courseId, departmentId);
+	            pairs.add(pair);
+	        }
+	        System.out.println("✅ Loaded " + pairs.size() + " course–department pairs from " + inputFile);
+	    } catch (IOException e) {
+	        System.out.println("⚠️ Error reading course–department pairs from " + inputFile);
+	        e.printStackTrace();
+	    }
+
+	    return pairs;
 	}
 	
 	// Save Course-Instructor Pairs to CSV
@@ -1175,6 +1416,25 @@ public class Webscraping {
 	        e.printStackTrace();
 	    }
 	}
+	
+	public static void saveCourseRequirementPairsToCSV(HashSet<CourseRequirementPair> pairs, String filePath) {
+	    try (PrintWriter writer = new PrintWriter(new FileWriter(SAVE_PATH + filePath))) {
+	        // Header
+	        writer.println("CourseID,PrereqID,Alternatives");
+
+	        for (CourseRequirementPair pair : pairs) {
+	            String courseId = String.valueOf(pair.getCourseId());
+	            String prereqId = String.valueOf(pair.getPrereqId());
+	            String alternatives = escapeCsv(pair.getAlternatives().replaceAll("[\\r\\n]+", " "));
+
+	            writer.printf("%s,%s,%s%n", courseId, prereqId, alternatives);
+	        }
+
+	        System.out.println("✅ Saved " + pairs.size() + " course requirement pairs to " + filePath);
+	    } catch (IOException e) {
+	        System.out.println("❌ Error writing course requirement pairs to CSV: " + e.getMessage());
+	    }
+	}
 
 	// Utility to extract the description text from the inner HTML of the description div
 	private static String extractDescriptionFromHtml(String html) {
@@ -1209,5 +1469,36 @@ public class Webscraping {
 
 		// Normalize whitespace
 		return unescaped.replaceAll("\\s+", " ").trim();
+	}
+	
+	private static void cleanPaperYears(HashSet<Paper> papers) {
+	    int fixed = 0;
+
+	    for (Paper paper : papers) {
+	        String date = paper.getPubdate();
+	        if (date == null || date.isEmpty()) continue;
+
+	        // Extract a 2- or 4-digit year pattern
+	        Matcher m = Pattern.compile("(\\d{4}|\\d{2})").matcher(date);
+	        if (m.find()) {
+	            String year = m.group(1);
+
+	            // Normalize to 4 digits
+	            if (year.length() == 2) {
+	                int yr = Integer.parseInt(year);
+	                if (yr >= 50) year = "19" + year; // assume 1950–1999
+	                else year = "20" + year;          // assume 2000–2049
+	            }
+
+	            if (!year.equals(paper.getPubdate())) {
+	                paper.setPubdate(year);
+	                fixed++;
+	            }
+	        } else {
+	            paper.setPubdate(""); // no year found
+	        }
+	    }
+
+	    System.out.println("✅ Cleaned publication years for " + fixed + " papers.");
 	}
 }
