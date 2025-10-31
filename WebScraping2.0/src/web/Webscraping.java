@@ -26,6 +26,7 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import java.time.Duration;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,12 +34,12 @@ public class Webscraping {
 
 	private static final String SAVE_PATH = "C:/Users/owens/OneDrive/Documents/";
 
-	public static void main(String[] args) throws InterruptedException {
+	public static void main(String[] args) throws InterruptedException, TimeoutException {
 	    System.setProperty("webdriver.gecko.driver",
 	            "C:/Users/owens/OneDrive/Documents/geckodriver-v0.36.0-win64/geckodriver.exe");
 	    WebDriver driver = new FirefoxDriver();
 	    WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(120));
-	    /*
+	    
 	    // Load departments
 	    HashSet<Department> departments = loadDepartments();
 
@@ -55,27 +56,26 @@ public class Webscraping {
 
 	    // Save UVA Faculty Data
 	    saveInstructorsToCSV(instructors, "InstructorCatalog.csv");
-	    saveInstructorDepartmentPairsToCSV(instructorDepartmentPairs, "InstructorDepartmentPairs.csv");
-	    saveTopicsToCSV(topics, "TopicCatalog.csv");
-	    saveTopicInstructorPairsToCSV(topicInstructorPairs, "TopicInstructorPairs.csv");
-	    */
+	    //saveInstructorDepartmentPairsToCSV(instructorDepartmentPairs, "InstructorDepartmentPairs.csv");
+	    //saveTopicsToCSV(topics, "TopicCatalog.csv");
+	    //saveTopicInstructorPairsToCSV(topicInstructorPairs, "TopicInstructorPairs.csv");
+	    
 
 	    // Scrape Courses
-	    //List<HashSet<?>> courseData = getCourses(driver, wait, departments);
-	    //@SuppressWarnings("unchecked")
-	    //HashSet<Course> courses = (HashSet<Course>) courseData.get(0);
-	    //@SuppressWarnings("unchecked")
-	    //HashSet<CourseDepartmentPair> courseDepartmentPairs = (HashSet<CourseDepartmentPair>) courseData.get(1);
+	    List<HashSet<?>> courseData = getCourses(driver, wait, departments);
+	    @SuppressWarnings("unchecked")
+	    HashSet<Course> courses = (HashSet<Course>) courseData.get(0);
+	    @SuppressWarnings("unchecked")
+	    HashSet<CourseDepartmentPair> courseDepartmentPairs = (HashSet<CourseDepartmentPair>) courseData.get(1);
 
 	    // Save Course Data
-	    //saveCoursesToCSV(courses, "CourseCatalog.csv");
-	    //saveCourseDepartmentPairsToCSV(courseDepartmentPairs, "CourseDepartmentPairs.csv");
+	    saveCoursesToCSV(courses, "CourseCatalog.csv");
+	    saveCourseDepartmentPairsToCSV(courseDepartmentPairs, "CourseDepartmentPairs.csv");
 	    
 	    // Get course-instructor pairs
-	    //HashSet<CourseInstructorPair> courseInstructorPairs = getCourseInstructorPairs(driver, wait, courses, instructors);
+	    HashSet<CourseInstructorPair> courseInstructorPairs = getCourseInstructorPairs(driver, wait, courses, instructors);
 
 	    // Save course-instructor pairs
-	    //saveCourseInstructorPairsToCSV(courseInstructorPairs, "CourseInstructorPairs.csv");
 	    
 	    // Scrape Google Scholar papers and topics
 	    
@@ -116,9 +116,9 @@ public class Webscraping {
 	    //savePapersToCSV(papers, "PaperCatalog.csv");
 	    
 	    //get course requirments
-	    HashSet<Department> departments = loadDepartments();
-	    HashSet<CourseDepartmentPair> courseDepartmentPairs = loadCourseDepartmentPairsFromCSV("CourseDepartmentPairs.csv");
-	    HashSet<Course> courses = loadCoursesFromCSV("CourseCatalog.csv", courseDepartmentPairs, departments);
+	    //HashSet<Department> departments = loadDepartments();
+	    //HashSet<CourseDepartmentPair> courseDepartmentPairs = loadCourseDepartmentPairsFromCSV("CourseDepartmentPairs.csv");
+	    //HashSet<Course> courses = loadCoursesFromCSV("CourseCatalog.csv", courseDepartmentPairs, departments);
 	    HashSet<CourseRequirementPair> courseRequirementPairs = extractCourseRequirements(driver, wait, departments, courses);
 	    saveCourseRequirementPairsToCSV(courseRequirementPairs, "CourseRequirementPairs.csv");
 	    
@@ -186,9 +186,11 @@ public class Webscraping {
 
 			    // ---------- Instructor info ----------
 			    String profName = "";
+			    String tempName = "";
 			    List<WebElement> nameElements = driver.findElements(By.cssSelector("h1.page_title"));
 			    if (!nameElements.isEmpty()) {
 			        profName = nameElements.get(0).getText().trim().split(",")[0].trim();
+			        tempName = profName;
 			        String[] parts = profName.split(" ");
 			        if (parts.length >= 3) {
 			            profName = parts[0] + " " + parts[2]; // Remove middle name
@@ -200,7 +202,7 @@ public class Webscraping {
 			    if (!typographyDivs.isEmpty()) {
 			        for (WebElement child : typographyDivs.get(0).findElements(By.xpath("./*"))) {
 			            if (child.getTagName().equalsIgnoreCase("p")) {
-			                description = child.getText().trim();
+			                description = tempName +" | "+child.getText().trim();
 			                break;
 			            }
 			        }
@@ -297,7 +299,7 @@ public class Webscraping {
 	    String extraUrl = "&Type=Group&Group=";
 
 	    for (String deptCode : departments) {
-	        for (int i = 25; i >= 12; i--) {
+	        for (int i = 25; i >= 20; i--) {
 	            for (int semesterId : semesterIds) {
 	                String url = baseUrl + i + semesterId + extraUrl + deptCode;
 	                driver.get(url);
@@ -779,7 +781,7 @@ public class Webscraping {
 	        WebDriver driver,
 	        WebDriverWait wait,
 	        HashSet<Department> departmentsSet,
-	        HashSet<Course> courses) {
+	        HashSet<Course> courses) throws TimeoutException {
 
 	    HashSet<CourseRequirementPair> courseRequirementPairs = new HashSet<>();
 
@@ -803,13 +805,24 @@ public class Webscraping {
 
 	    // --- Crawl through departments and semesters ---
 	    for (String deptCode : departments) {
-	        for (int year = 25; year >= 12; year--) {
+	        for (int year = 25; year >= 20; year--) {
 	            for (int semesterId : semesterIds) {
 	                String url = baseUrl + year + semesterId + extraUrl + deptCode;
 	                System.out.println("DEBUG: Visiting URL: " + url);
 
 	                driver.get(url);
-	                safeSleepWithRandom(800, 1500);
+
+	                wait.until((WebDriver d) -> {
+					    List<WebElement> rows = d.findElements(By.xpath("//tr"));
+					    List<WebElement> groupNotFound = d.findElements(By.xpath("//body[contains(.,'Group not found')]"));
+					    return (!rows.isEmpty() || !groupNotFound.isEmpty()) ? true : null;
+					});
+
+	                // If page shows "Group not found", skip it
+	                if (!driver.findElements(By.xpath("//body[contains(.,'Group not found')]")).isEmpty()) {
+	                    System.out.println("ℹ️ No courses found for " + deptCode + " year=" + year + " sem=" + semesterId);
+	                    continue;
+	                }
 
 	                List<WebElement> rows = driver.findElements(By.xpath("//tr"));
 	                System.out.println("DEBUG: Found " + rows.size() + " <tr> rows for deptCode=" + deptCode + " year=" + year + " sem=" + semesterId);
@@ -849,7 +862,7 @@ public class Webscraping {
 
 	                                System.out.println("DEBUG: Raw hoverText: " + hoverText);
 
-	                                // Updated regex: support "return overlib('...text...',AUTOSTATUS,WRAP)"
+	                                // Match overlib text even with "return overlib(...)" or plain "overlib(...)"
 	                                Matcher matcher = Pattern.compile(
 	                                        "overlib\\s*\\(\\s*'([^']+)'\\s*,",
 	                                        Pattern.CASE_INSENSITIVE
@@ -860,13 +873,12 @@ public class Webscraping {
 	                                    continue;
 	                                }
 
-	                                // Clean up and normalize the text
+	                                // Clean and normalize requirement text
 	                                String reqText = matcher.group(1)
 	                                        .replace("Enrollment Requirements:", "")
 	                                        .replace("&nbsp;", " ")
 	                                        .replace("&amp;", "&")
 	                                        .trim();
-
 	                                reqText = reqText.replaceAll("\\s+", " ");
 	                                System.out.println("✅ Parsed prereqText for " + currentCourseKey + ": " + reqText);
 
