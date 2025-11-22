@@ -18,9 +18,11 @@ import java.util.Set;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.firefox.FirefoxDriver;
+import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
 import org.openqa.selenium.support.ui.ExpectedConditions;
@@ -43,7 +45,8 @@ public class Webscraping {
 	    // Load departments
 	    HashSet<Department> departments = loadDepartments();
 
-	    // Scrape UVA Faculty
+	    // Scrape UVA Faculty 
+	    /*
 	    List<HashSet<?>> UVAFacultyData = scrapeUVAFaculty(driver, wait);
 	    @SuppressWarnings("unchecked")
 	    HashSet<Instructor> instructors = (HashSet<Instructor>) UVAFacultyData.get(0);
@@ -56,30 +59,31 @@ public class Webscraping {
 
 	    // Save UVA Faculty Data
 	    saveInstructorsToCSV(instructors, "InstructorCatalog.csv");
-	    //saveInstructorDepartmentPairsToCSV(instructorDepartmentPairs, "InstructorDepartmentPairs.csv");
-	    //saveTopicsToCSV(topics, "TopicCatalog.csv");
-	    //saveTopicInstructorPairsToCSV(topicInstructorPairs, "TopicInstructorPairs.csv");
-	    
+	    saveInstructorDepartmentPairsToCSV(instructorDepartmentPairs, "InstructorDepartmentPairs.csv");
+	    saveTopicsToCSV(topics, "TopicCatalog.csv");
+	    saveTopicInstructorPairsToCSV(topicInstructorPairs, "TopicInstructorPairs.csv");
+	    */
+	    HashSet<Instructor> instructors = loadInstructorsFromCSV("InstructorCatalog.csv");
 
 	    // Scrape Courses
-	    List<HashSet<?>> courseData = getCourses(driver, wait, departments);
-	    @SuppressWarnings("unchecked")
-	    HashSet<Course> courses = (HashSet<Course>) courseData.get(0);
-	    @SuppressWarnings("unchecked")
-	    HashSet<CourseDepartmentPair> courseDepartmentPairs = (HashSet<CourseDepartmentPair>) courseData.get(1);
+	    //List<HashSet<?>> courseData = getCourses(driver, wait, departments);
+	    //@SuppressWarnings("unchecked")
+	    HashSet<CourseDepartmentPair> courseDepartmentPairs = loadCourseDepartmentPairsFromCSV("CourseDepartmentPairs.csv");
+	    HashSet<Course> courses = loadCoursesFromCSV("CourseCatalog.csv", courseDepartmentPairs, departments);
+	    //@SuppressWarnings("unchecked")
+	    //HashSet<CourseDepartmentPair> courseDepartmentPairs = (HashSet<CourseDepartmentPair>) courseData.get(1);
 
 	    // Save Course Data
-	    saveCoursesToCSV(courses, "CourseCatalog.csv");
-	    saveCourseDepartmentPairsToCSV(courseDepartmentPairs, "CourseDepartmentPairs.csv");
+	    //saveCoursesToCSV(courses, "CourseCatalog.csv");
+	    //saveCourseDepartmentPairsToCSV(courseDepartmentPairs, "CourseDepartmentPairs.csv");
 	    
 	    // Get course-instructor pairs
 	    HashSet<CourseInstructorPair> courseInstructorPairs = getCourseInstructorPairs(driver, wait, courses, instructors);
-
+	    courseInstructorPairs = getCourseInstructorPairs2025(driver, wait, courses, instructors, courseInstructorPairs);
 	    // Save course-instructor pairs
-	    
+	    saveCourseInstructorPairsToCSV(courseInstructorPairs, "CourseInstructorPairs.csv");
 	    // Scrape Google Scholar papers and topics
 	    
-	    //HashSet<Instructor> instructors = loadInstructorsFromCSV("InstructorCatalog.csv");
 	    //HashSet<Topic> topics = loadTopicsFromCSV("TopicCatalog.csv");
 	    //HashSet<TopicInstructorPair> topicInstructorPairs = loadTopicInstructorPairsFromCSV("TopicInstructorPairs.csv");
 	    //HashSet<PaperInstructorPair> paperInstructorPairs = loadPaperInstructorPairsFromCSV("PaperInstructorPairs.csv");
@@ -119,8 +123,8 @@ public class Webscraping {
 	    //HashSet<Department> departments = loadDepartments();
 	    //HashSet<CourseDepartmentPair> courseDepartmentPairs = loadCourseDepartmentPairsFromCSV("CourseDepartmentPairs.csv");
 	    //HashSet<Course> courses = loadCoursesFromCSV("CourseCatalog.csv", courseDepartmentPairs, departments);
-	    HashSet<CourseRequirementPair> courseRequirementPairs = extractCourseRequirements(driver, wait, departments, courses);
-	    saveCourseRequirementPairsToCSV(courseRequirementPairs, "CourseRequirementPairs.csv");
+	    //HashSet<CourseRequirementPair> courseRequirementPairs = extractCourseRequirements(driver, wait, departments, courses);
+	    //saveCourseRequirementPairsToCSV(courseRequirementPairs, "CourseRequirementPairs.csv");
 	    
 	    driver.quit();
 	}
@@ -289,93 +293,121 @@ public class Webscraping {
 		return results;
 	}
 
-	public static List<HashSet<?>> getCourses(WebDriver driver, WebDriverWait wait, HashSet<Department> departmentsSet) {
+	public static List<HashSet<?>> getCourses(WebDriver driver, WebDriverWait wait, HashSet<Department> departmentsSet) throws TimeoutException {
 	    HashSet<Course> courses = new HashSet<>();
 	    HashSet<CourseDepartmentPair> courseDepartmentPairs = new HashSet<>();
+	    Map<String, Integer> courseIdMap = new HashMap<>(); // key = dept+num+name → id
 
-	    int[] semesterIds = {8, 6, 2, 1}; // fall, summer, spring, january
-	    String[] departments = {"APMA", "BME", "CHE", "CEE", "CompSci", "ECE", "ENGR", "MAE", "MSE", "STS", "SYS"};
+	    int nextCourseId = 1;
+	    int[] semesterIds = {8, 6, 2, 1}; // Fall, Summer, Spring, January
+	    String[] departments = {"APMA", "BME", "CHE", "CEE", "CompSci", "ECE", "ENGR", "MAE", "MSE", "STS", "SYS", "EngineeringBusiness"};
 	    String baseUrl = "https://louslist.org/page.php?Semester=1";
 	    String extraUrl = "&Type=Group&Group=";
 
 	    for (String deptCode : departments) {
-	        for (int i = 25; i >= 20; i--) {
+	        for (int year = 25; year >= 20; year--) {
 	            for (int semesterId : semesterIds) {
-	                String url = baseUrl + i + semesterId + extraUrl + deptCode;
+	                String url = baseUrl + year + semesterId + extraUrl + deptCode;
+	                System.out.println("🔎 Visiting: " + url);
 	                driver.get(url);
 
-	                List<WebElement> courseNames = driver.findElements(By.className("CourseName"));
-	                List<WebElement> courseNums = driver.findElements(By.className("CourseNum"));
+	                // Wait for course table OR "Group not found"
+	                wait.until(ExpectedConditions.or(
+	                    ExpectedConditions.presenceOfElementLocated(By.xpath("//tr")),
+	                    ExpectedConditions.presenceOfElementLocated(By.xpath("//body[contains(text(), 'Group not found')]"))
+	                ));
 
-	                int size = Math.min(courseNames.size(), courseNums.size());
+	                if (driver.getPageSource().contains("Group not found")) {
+	                    System.out.println("ℹ️ No data for " + deptCode + " " + year + semesterId);
+	                    continue;
+	                }
 
-	                for (int idx = 0; idx < size; idx++) {
+	                // Snapshot course list
+	                List<WebElement> numEls = driver.findElements(By.className("CourseNum"));
+	                List<WebElement> nameEls = driver.findElements(By.className("CourseName"));
+	                int size = Math.min(numEls.size(), nameEls.size());
+	                List<String[]> snapshot = new ArrayList<>();
+
+	                for (int i = 0; i < size; i++) {
 	                    try {
-	                        WebElement courseNumElement = courseNums.get(idx);
-	                        WebElement courseNameElement = courseNames.get(idx);
-
-	                        // Get catalog number
-	                        WebElement span = courseNumElement.findElement(By.tagName("span"));
-	                        String catalogNumber = span.getText().trim();
-	                        String departmentCode = catalogNumber.split(" ")[0];
-	                        String number = catalogNumber.split(" ")[1];
-
-	                        // Get title
-	                        String name = courseNameElement.getText().trim();
-
-	                        // Click course name to reveal description
-	                        courseNameElement.click();
-
-	                        WebElement descDiv = wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("ovfl1")));
-
-	                        // Use getText() to get only visible text (no <script> content)
-	                        String description = descDiv.getText().trim();
-
-	                        // Fallback cleanup (if Lou’s List still includes analytics)
-	                        description = description.replaceAll("window\\.dataLayer.*", "").trim();
-
-	                        // Create Course
-	                        Course newCourse = new Course(departmentCode, number, name, description);
-
-	                        // Assign ID after confirming uniqueness
-	                        if (!courses.contains(newCourse)) {
-	                            newCourse.setId(courses.size() + 1);
-	                            courses.add(newCourse);
-	                        }
-
-	                        // Look up department ID from departmentsSet
-	                        int deptId = -1;
-	                        for (Department d : departmentsSet) {
-	                            if (d.getName().equalsIgnoreCase(departmentCode)) {
-	                                deptId = d.getId();
-	                                break;
-	                            }
-	                        }
-
-	                        // Create course-department pair if valid department found
-	                        if (deptId != -1) {
-	                            CourseDepartmentPair pair = new CourseDepartmentPair(newCourse.getId(), deptId);
-	                            courseDepartmentPairs.add(pair);
-	                        }
-
+	                        String num = numEls.get(i).findElement(By.tagName("span")).getText().trim();
+	                        String name = nameEls.get(i).getText().trim();
+	                        snapshot.add(new String[]{num, name});
 	                    } catch (Exception e) {
-	                        System.out.println("Error processing course at index " + idx + ": " + e.getMessage());
+	                        System.out.println("⚠️ Snapshot failed for " + i + ": " + e.getMessage());
+	                    }
+	                }
+
+	                // Process each course in snapshot
+	                for (String[] entry : snapshot) {
+	                    String catalog = entry[0];
+	                    String visibleName = entry[1];
+	                    String[] parts = catalog.split("\\s+");
+	                    if (parts.length < 2) continue;
+
+	                    String departmentCode = parts[0];
+	                    String number = parts[1];
+	                    String key = departmentCode + "_" + number + "_" + visibleName;
+
+	                    // Skip duplicates
+	                    if (!courseIdMap.containsKey(key)) {
+	                        courseIdMap.put(key, nextCourseId++);
+	                    }
+	                    int assignedId = courseIdMap.get(key);
+
+	                    Course course = new Course(departmentCode, number, visibleName, "");
+	                    course.setId(assignedId);
+
+	                    boolean success = false;
+	                    for (int attempt = 1; attempt <= 3 && !success; attempt++) {
+	                        try {
+	                            String xpath = "//td[@class='CourseNum']/span[normalize-space(text())='" + catalog + "']" +
+	                                           "/ancestor::tr/td[contains(@class,'CourseName')]";
+	                            WebElement clickable = wait.until(ExpectedConditions.elementToBeClickable(By.xpath(xpath)));
+	                            clickable.click();
+
+	                            WebElement descDiv = wait.until(ExpectedConditions.visibilityOfElementLocated(By.className("ovfl1")));
+	                            String desc = descDiv.getText().trim().replaceAll("window\\.dataLayer.*", "").trim();
+	                            course.setDescription(desc);
+
+	                            ((JavascriptExecutor) driver).executeScript("document.querySelectorAll('.ovfl1').forEach(e => e.style.display='none');");
+	                            wait.until(ExpectedConditions.invisibilityOfElementLocated(By.className("ovfl1")));
+
+	                            success = true;
+	                        } catch (Exception e) {
+	                            System.out.println("⚠️ Retry " + attempt + " for " + catalog + ": " + e.getMessage());
+	                        }
+	                    }
+
+	                    // Add course (no duplicates)
+	                    if (!courses.contains(course)) {
+	                        courses.add(course);
+	                    }
+
+	                    // Add matching department pair (1-to-1)
+	                    int deptId = departmentsSet.stream()
+	                            .filter(d -> d.getName().equalsIgnoreCase(departmentCode))
+	                            .map(Department::getId)
+	                            .findFirst()
+	                            .orElse(-1);
+
+	                    if (deptId != -1) {
+	                        courseDepartmentPairs.add(new CourseDepartmentPair(course.getId(), deptId));
 	                    }
 	                }
 	            }
 	        }
 	    }
 
-	    // Final pass: cleanup any leftover analytics text
-	    for (Course c : courses) {
-	        c.setDescription(c.getDescription().replaceAll("window\\.dataLayer.*", "").trim());
-	    }
+	    System.out.println("✅ Total courses: " + courses.size());
+	    System.out.println("✅ Total course–department pairs: " + courseDepartmentPairs.size());
 
 	    List<HashSet<?>> result = new ArrayList<>();
 	    result.add(courses);
 	    result.add(courseDepartmentPairs);
 	    return result;
 	}
+
 
 	private static HashSet<CourseInstructorPair> getCourseInstructorPairs(
 	        WebDriver driver, WebDriverWait wait,
@@ -401,40 +433,162 @@ public class Webscraping {
 	                    String[] instructorNames = instructorCell.split(",");
 
 	                    for (String rawName : instructorNames) {
-	                        String instructorName = rawName.trim();
-	                        if (instructorName.isEmpty()) continue;
+							String instructorName = rawName.trim();
+							if (instructorName.isEmpty())
+								continue;
 
-	                        Instructor temp = new Instructor();
-	                        temp.setName(instructorName);
+							Instructor temp = new Instructor();
+							temp.setName(instructorName);
 
-	                        for (Instructor existing : instructors) {
-	                            if (existing.equals(temp)) {
-	                                // Create new pair
-	                                CourseInstructorPair pair = new CourseInstructorPair(c.getId(), existing.getId(), semesterRaw);
+							for (Instructor existing : instructors) {
+								if (existing.equals(temp)) {
+									// Create new pair
+									CourseInstructorPair pair = new CourseInstructorPair(c.getId(), existing.getId(),
+											semesterRaw);
 
-	                                // If pair exists, update semesters
-	                                if (pairs.contains(pair)) {
-	                                    for (CourseInstructorPair existingPair : pairs) {
-	                                        if (existingPair.equals(pair)) {
-	                                            existingPair.addSemester(semesterRaw);
-	                                            break;
-	                                        }
-	                                    }
-	                                } else {
-	                                    pairs.add(pair);
-	                                }
+									// If pair exists, update semesters
+									if (pairs.contains(pair)) {
+										for (CourseInstructorPair existingPair : pairs) {
+											if (existingPair.equals(pair)) {
+												existingPair.addSemester(semesterRaw);
+												break;
+											}
+										}
+									} else {
+										pairs.add(pair);
+									}
 
-	                                break;
-	                            }
-	                        }
-	                    }
-	                }
-	            }
-	        }
-	    }
-
-	    return pairs;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		return pairs;
 	}
+	
+	private static HashSet<CourseInstructorPair> getCourseInstructorPairs2025(
+	        WebDriver driver, WebDriverWait wait,
+	        HashSet<Course> courses, HashSet<Instructor> instructors,
+	        HashSet<CourseInstructorPair> courseInstructorPairs) {
+
+		int[] semesterIds = {8, 6, 2, 1}; // Fall, Summer, Spring, January
+		String[] departments = {"APMA", "BME", "CHE", "CEE", "CompSci", "ECE", "ENGR",
+		                        "MAE", "MSE", "STS", "SYS", "EngineeringBusiness"};
+		String baseUrl = "https://louslist.org/page.php?Semester=1";
+		String extraUrl = "&Type=Group&Group=";
+
+		for (String deptCode : departments) {
+		    for (int semesterId : semesterIds) {
+		        String year = "20" + (25); // URL has "25" prefix → 2025
+		        String semesterName;
+		        switch (semesterId) {
+		            case 8 -> semesterName = "Fall";
+		            case 6 -> semesterName = "Summer";
+		            case 2 -> semesterName = "Spring";
+		            case 1 -> semesterName = "January";
+		            default -> semesterName = "Unknown";
+		        }
+		        String semesterRaw = semesterName + " " + year; // e.g., "Fall 2025"
+
+		        String url = baseUrl + "25" + semesterId + extraUrl + deptCode;
+		        System.out.println("🔎 Visiting: " + url);
+		        driver.get(url);
+
+		        wait.until(ExpectedConditions.or(
+		                ExpectedConditions.presenceOfElementLocated(By.xpath("//tr")),
+		                ExpectedConditions.presenceOfElementLocated(By.xpath("//body[contains(text(), 'Group not found')]"))
+		        ));
+
+		        if (driver.getPageSource().contains("Group not found")) {
+		            System.out.println("ℹ️ No data for " + deptCode + " " + semesterRaw);
+		            continue;
+		        }
+
+		        List<WebElement> rows = driver.findElements(By.xpath("//tr"));
+		        Course currentCourse = null;
+
+		        for (WebElement row : rows) {
+		            List<WebElement> tds = row.findElements(By.tagName("td"));
+		            if (tds.isEmpty()) continue;
+
+		            // Check for course row
+		            if (tds.get(0).getAttribute("class").contains("CourseNum")) {
+		                String courseNumText = tds.get(0).getText().trim(); // e.g., "ECE 2200"
+		                String[] parts = courseNumText.split(" ");
+		                if (parts.length < 2) {
+		                    currentCourse = null;
+		                    continue;
+		                }
+
+		                String dept = parts[0];
+		                String number = parts[1];
+
+		                currentCourse = null;
+		                for (Course c : courses) {
+		                    if (c.getDepartment().equalsIgnoreCase(dept) && c.getNumber().equals(number)) {
+		                        currentCourse = c;
+		                        break;
+		                    }
+		                }
+		                continue;
+		            }
+
+		            // Section row
+		            if (currentCourse == null) continue;
+
+		            // Determine instructor column safely
+		            int instructorColIndex = -1;
+		            for (int idx = 5; idx <= 6; idx++) {
+		                if (tds.size() > idx) {
+		                    instructorColIndex = idx;
+		                    break;
+		                }
+		            }
+		            if (instructorColIndex == -1) continue;
+
+		            String instructorCell = tds.get(instructorColIndex).getText().trim();
+		            if (instructorCell.isEmpty()) continue;
+
+		            String[] instructorNames = instructorCell.split(",");
+		            for (String rawName : instructorNames) {
+		                String instructorName = rawName.trim();
+		                if (instructorName.isEmpty()) continue;
+
+		                Instructor temp = new Instructor();
+		                temp.setName(instructorName);
+
+		                for (Instructor existing : instructors) {
+		                    if (existing.equals(temp)) {
+		                        CourseInstructorPair pair = new CourseInstructorPair(
+		                                currentCourse.getId(),
+		                                existing.getId(),
+		                                semesterRaw
+		                        );
+
+		                        if (courseInstructorPairs.contains(pair)) {
+		                            for (CourseInstructorPair existingPair : courseInstructorPairs) {
+		                                if (existingPair.equals(pair)) {
+		                                    existingPair.addSemester(semesterRaw);
+		                                    break;
+		                                }
+		                            }
+		                        } else {
+		                            courseInstructorPairs.add(pair);
+		                        }
+		                        break;
+		                    }
+		                }
+		            }
+		        }
+		    }
+		}
+	    return courseInstructorPairs;
+	}
+	
+	
 
 	public static List<HashSet<?>> scrapeScholarPapersAndTopics(
 	        WebDriver driver, WebDriverWait wait,
@@ -1294,16 +1448,78 @@ public class Webscraping {
 	// Save Course-Instructor Pairs to CSV
 	public static void saveCourseInstructorPairsToCSV(HashSet<CourseInstructorPair> pairs, String filePath) {
 	    try (PrintWriter writer = new PrintWriter(new FileWriter(SAVE_PATH + filePath))) {
-	        writer.println("CourseID;InstructorID;Semesters");
+
+	        writer.println("CourseID,InstructorID,Semesters");
+
 	        for (CourseInstructorPair pair : pairs) {
-	            // Join semesters with a semicolon or other delimiter
-	            String semesters = String.join(",", pair.getSemesters());
-	            writer.printf("%d;%d;%s%n", pair.getCourseId(), pair.getInstructorId(), semesters);
+
+	            // Join semesters with commas
+	            String semesterList = String.join(",", pair.getSemesters());
+
+	            // Escape and wrap for CSV
+	            semesterList = escapeCsv(semesterList);
+
+	            writer.printf("%d,%d,%s%n",
+	                    pair.getCourseId(),
+	                    pair.getInstructorId(),
+	                    semesterList
+	            );
 	        }
+
 	        System.out.println("✅ Saved " + pairs.size() + " course-instructor pairs to " + filePath);
+
 	    } catch (IOException e) {
 	        e.printStackTrace();
 	    }
+	}
+	
+	private static HashSet<CourseInstructorPair> loadCourseInstructorPairsFromCSV(String fileName) {
+	    HashSet<CourseInstructorPair> pairs = new HashSet<>();
+	    String inputFile = SAVE_PATH + fileName;
+
+	    try (BufferedReader br = new BufferedReader(new FileReader(inputFile))) {
+	        String line = br.readLine(); // skip header
+	        while ((line = br.readLine()) != null) {
+	            List<String> parts = parseCsvLine(line);
+	            if (parts.size() < 3) continue;
+
+	            int courseId = Integer.parseInt(parts.get(0).trim());
+	            int instructorId = Integer.parseInt(parts.get(1).trim());
+	            String semestersStr = parts.get(2).trim();
+
+	            if (!semestersStr.isEmpty()) {
+	                String[] semesters = semestersStr.split(",");
+	                for (String semester : semesters) {
+	                    // Use constructor with semester to initialize
+	                    CourseInstructorPair tempPair = new CourseInstructorPair(courseId, instructorId, semester.trim());
+
+	                    // Merge if already exists
+	                    if (pairs.contains(tempPair)) {
+	                        for (CourseInstructorPair existing : pairs) {
+	                            if (existing.equals(tempPair)) {
+	                                existing.addSemester(semester.trim());
+	                                break;
+	                            }
+	                        }
+	                    } else {
+	                        pairs.add(tempPair);
+	                    }
+	                }
+	            } else {
+	                // No semester, just add empty pair
+	                CourseInstructorPair tempPair = new CourseInstructorPair(courseId, instructorId, null);
+	                pairs.add(tempPair);
+	            }
+	        }
+
+	        System.out.println("✅ Loaded " + pairs.size() + " course-instructor pairs from " + inputFile);
+
+	    } catch (IOException e) {
+	        System.out.println("⚠️ Error reading course-instructor pairs from " + inputFile);
+	        e.printStackTrace();
+	    }
+
+	    return pairs;
 	}
 	
 	private static HashSet<Paper> loadPapersFromCSV(String fileName) {

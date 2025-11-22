@@ -73,13 +73,14 @@ public class Course {
         if (this == o) return true;
         if (!(o instanceof Course)) return false;
         Course course = (Course) o;
-        return Objects.equals(number, course.number) &&
-               Objects.equals(name, course.name);
+        return department.equalsIgnoreCase(course.department)
+                && number.equalsIgnoreCase(course.number)
+                && name.equalsIgnoreCase(course.name);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(number, name);
+        return Objects.hash(department.toUpperCase(), number.toUpperCase(), name.toUpperCase());
     }
 
     // toString
